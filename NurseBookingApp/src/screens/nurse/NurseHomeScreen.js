@@ -9,18 +9,13 @@ import {
   Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import AuthService from '../../services/AuthService';
+import UserService from '../../services/UserService';
 
 const NurseHomeScreen = ({ navigation }) => {
   const [userData, setUserData] = useState(null);
   const [isAvailable, setIsAvailable] = useState(false);
-  const [stats, setStats] = useState({
-    totalBookings: 45,
-    todayBookings: 3,
-    rating: 4.9,
-    earnings: 2500,
-  });
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
@@ -29,23 +24,36 @@ const NurseHomeScreen = ({ navigation }) => {
 
   const loadUserData = async () => {
     try {
-      const data = await AsyncStorage.getItem('userData');
+      const data = await AuthService.getCurrentUserData();
       if (data) {
-        setUserData(JSON.parse(data));
+        setUserData(data);
+        setIsAvailable(data.nurseData?.isAvailable || false);
       }
     } catch (error) {
       console.error('Error loading user data:', error);
     }
   };
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
+    await loadUserData();
+    setRefreshing(false);
   };
 
   const toggleAvailability = async () => {
-    setIsAvailable(!isAvailable);
-    await AsyncStorage.setItem('nurseAvailable', JSON.stringify(!isAvailable));
+    const user = AuthService.getCurrentUser();
+    if (!user) return;
+
+    const newStatus = !isAvailable;
+    setIsAvailable(newStatus);
+    await UserService.updateNurseAvailability(user.uid, newStatus);
+  };
+
+  const stats = {
+    totalBookings: userData?.nurseData?.totalBookings || 0,
+    completedBookings: userData?.nurseData?.completedBookings || 0,
+    rating: userData?.nurseData?.rating || 5.0,
+    earnings: userData?.nurseData?.earnings?.thisMonth || 0,
   };
 
   return (
@@ -87,9 +95,9 @@ const NurseHomeScreen = ({ navigation }) => {
             <Text style={styles.statLabel}>Total Jobs</Text>
           </View>
           <View style={styles.statCard}>
-            <Ionicons name="calendar" size={24} color="#34C759" />
-            <Text style={styles.statValue}>{stats.todayBookings}</Text>
-            <Text style={styles.statLabel}>Today</Text>
+            <Ionicons name="checkmark-circle" size={24} color="#34C759" />
+            <Text style={styles.statValue}>{stats.completedBookings}</Text>
+            <Text style={styles.statLabel}>Completed</Text>
           </View>
           <View style={styles.statCard}>
             <Ionicons name="star" size={24} color="#FF9500" />
@@ -99,7 +107,7 @@ const NurseHomeScreen = ({ navigation }) => {
           <View style={styles.statCard}>
             <Ionicons name="wallet" size={24} color="#34C759" />
             <Text style={styles.statValue}>${stats.earnings}</Text>
-            <Text style={styles.statLabel}>Earnings</Text>
+            <Text style={styles.statLabel}>This Month</Text>
           </View>
         </View>
       </ScrollView>
