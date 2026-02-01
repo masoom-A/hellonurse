@@ -13,6 +13,7 @@ export const formatTime = (timeString) => {
   return `${displayHour}:${minutes} ${ampm}`;
 };
 
+// ─── Currency (₹ INR) ────────────────────────────────────────────────────────
 export const formatCurrency = (amount) => {
-  return `$${amount.toFixed(2)}`;
+  return `₹${Math.round(amount * 100) / 100}`;
 };
