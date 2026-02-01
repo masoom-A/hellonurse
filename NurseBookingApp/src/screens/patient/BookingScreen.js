@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,12 +7,12 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import AuthService from '../../services/AuthService';
+import BookingService from '../../services/BookingService';
 
 const BookingScreen = ({ navigation }) => {
   const [selectedService, setSelectedService] = useState('');
@@ -21,6 +21,23 @@ const BookingScreen = ({ navigation }) => {
   const [address, setAddress] = useState('');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
+  const [location, setLocation] = useState(null);
+  const [userData, setUserData] = useState(null);
+
+  useEffect(() => {
+    loadUserData();
+  }, []);
+
+  const loadUserData = async () => {
+    try {
+      const data = await AuthService.getCurrentUserData();
+      if (data) {
+        setUserData(data);
+      }
+    } catch (error) {
+      console.error('Error loading user data:', error);
+    }
+  };
 
   const services = [
     { id: 'home-care', name: 'Home Care', icon: 'home' },
@@ -45,15 +62,19 @@ const BookingScreen = ({ navigation }) => {
         return;
       }
 
-      const location = await Location.getCurrentPositionAsync({});
-      const address = await Location.reverseGeocodeAsync({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
+      const currentLocation = await Location.getCurrentPositionAsync({});
+      const addresses = await Location.reverseGeocodeAsync({
+        latitude: currentLocation.coords.latitude,
+        longitude: currentLocation.coords.longitude,
       });
 
-      if (address[0]) {
-        const formattedAddress = `${address[0].street || ''}, ${address[0].city || ''}, ${address[0].region || ''}`;
+      if (addresses[0]) {
+        const formattedAddress = `${addresses[0].street || ''}, ${addresses[0].city || ''}, ${addresses[0].region || ''}`;
         setAddress(formattedAddress);
+        setLocation({
+          latitude: currentLocation.coords.latitude,
+          longitude: currentLocation.coords.longitude,
+        });
       }
     } catch (error) {
       Alert.alert('Error', 'Could not get location');
@@ -66,46 +87,68 @@ const BookingScreen = ({ navigation }) => {
       return;
     }
 
+    if (!location) {
+      Alert.alert('Error', 'Please use current location or enter valid address with coordinates');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const newBooking = {
-        id: Date.now(),
-        service: selectedService,
-        date: selectedDate,
-        time: selectedTime,
-        address,
-        notes,
-        status: 'upcoming',
-        nurseName: 'Sarah Johnson', // Mock data
-        createdAt: new Date().toISOString(),
-      };
+      const user = AuthService.getCurrentUser();
+      if (!user) {
+        Alert.alert('Error', 'You must be logged in to book');
+        setLoading(false);
+        return;
+      }
 
-      // Get existing bookings
-      const existingBookings = await AsyncStorage.getItem('patientBookings');
-      const bookings = existingBookings ? JSON.parse(existingBookings) : [];
-      
-      // Add new booking
-      bookings.push(newBooking);
-      await AsyncStorage.setItem('patientBookings', JSON.stringify(bookings));
-
-      Alert.alert('Success', 'Booking created successfully!', [
-        {
-          text: 'OK',
-          onPress: () => {
-            // Reset form
-            setSelectedService('');
-            setSelectedDate('');
-            setSelectedTime('');
-            setAddress('');
-            setNotes('');
-            // Navigate to bookings tab
-            navigation.navigate('Bookings');
-          },
+      // Create booking using BookingService
+      const result = await BookingService.createBooking({
+        type: 'scheduled',
+        serviceType: selectedService,
+        duration: 2, // Default 2 hours - will be dynamic in Phase 2
+        equipmentNeeded: [],
+        notes: notes,
+        location: location,
+        address: address,
+        scheduledFor: 'scheduled',
+        scheduledDate: selectedDate,
+        scheduledTime: selectedTime,
+        pricing: {
+          basePrice: 0, // Will be calculated in Phase 2
+          total: 0
         },
-      ]);
+        isEmergency: false,
+        urgency: 'normal',
+        metadata: {
+          patientName: userData?.name || '',
+          patientRating: userData?.patientData?.rating || 5.0
+        }
+      });
+
+      if (result.success) {
+        Alert.alert('Success', 'Booking created successfully!', [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Reset form
+              setSelectedService('');
+              setSelectedDate('');
+              setSelectedTime('');
+              setAddress('');
+              setNotes('');
+              setLocation(null);
+              // Navigate to bookings tab
+              navigation.navigate('Bookings');
+            },
+          },
+        ]);
+      } else {
+        Alert.alert('Error', result.error || 'Failed to create booking');
+      }
     } catch (error) {
-      Alert.alert('Error', 'Failed to create booking');
+      console.error('Booking error:', error);
+      Alert.alert('Error', 'Failed to create booking. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -212,6 +255,11 @@ const BookingScreen = ({ navigation }) => {
               multiline
               numberOfLines={3}
             />
+            {location && (
+              <Text style={styles.locationInfo}>
+                📍 Location captured: {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
+              </Text>
+            )}
           </View>
 
           {/* Additional Notes */}
@@ -243,6 +291,13 @@ const BookingScreen = ({ navigation }) => {
                 <Text style={styles.summaryLabel}>Time:</Text>
                 <Text style={styles.summaryValue}>{selectedTime}</Text>
               </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Duration:</Text>
+                <Text style={styles.summaryValue}>2 hours (default)</Text>
+              </View>
+              <Text style={styles.summaryNote}>
+                💡 Pricing will be calculated in Phase 2
+              </Text>
             </View>
           )}
 
@@ -349,6 +404,11 @@ const styles = StyleSheet.create({
     height: 100,
     textAlignVertical: 'top',
   },
+  locationInfo: {
+    fontSize: 12,
+    color: '#34C759',
+    marginTop: 8,
+  },
   timeGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -399,6 +459,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
+  },
+  summaryNote: {
+    fontSize: 12,
+    color: '#FF9500',
+    marginTop: 12,
+    fontStyle: 'italic',
   },
   bookButton: {
     backgroundColor: '#007AFF',
