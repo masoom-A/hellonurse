@@ -8,9 +8,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AuthService from '../../services/AuthService';
 
 const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
@@ -26,23 +27,20 @@ const LoginScreen = ({ navigation }) => {
     setLoading(true);
 
     try {
-      // Simulate API call - Replace with actual authentication
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // Use Firebase Auth instead of AsyncStorage
+      const result = await AuthService.login(email, password);
 
-      // Mock user data
-      const userData = {
-        email,
-        userType: email.includes('nurse') ? 'nurse' : 'patient',
-        name: email.split('@')[0],
-      };
-
-      await AsyncStorage.setItem('userData', JSON.stringify(userData));
-
-      // Navigate based on user type
-      if (userData.userType === 'nurse') {
-        navigation.replace('NurseMain');
+      if (result.success) {
+        const { user } = result;
+        
+        // Navigate based on user type
+        if (user.userType === 'nurse') {
+          navigation.replace('NurseMain');
+        } else {
+          navigation.replace('PatientMain');
+        }
       } else {
-        navigation.replace('PatientMain');
+        Alert.alert('Login Failed', result.error);
       }
     } catch (error) {
       Alert.alert('Error', 'Login failed. Please try again.');
