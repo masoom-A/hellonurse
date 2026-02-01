@@ -8,8 +8,8 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import AuthService from '../../services/AuthService';
 
 const PatientProfileScreen = ({ navigation }) => {
   const [userData, setUserData] = useState(null);
@@ -20,9 +20,9 @@ const PatientProfileScreen = ({ navigation }) => {
 
   const loadUserData = async () => {
     try {
-      const data = await AsyncStorage.getItem('userData');
+      const data = await AuthService.getCurrentUserData();
       if (data) {
-        setUserData(JSON.parse(data));
+        setUserData(data);
       }
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -36,11 +36,15 @@ const PatientProfileScreen = ({ navigation }) => {
         text: 'Logout',
         style: 'destructive',
         onPress: async () => {
-          await AsyncStorage.removeItem('userData');
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'Welcome' }],
-          });
+          const result = await AuthService.logout();
+          if (result.success) {
+            navigation.reset({
+              index: 0,
+              routes: [{ name: 'Welcome' }],
+            });
+          } else {
+            Alert.alert('Error', result.error);
+          }
         },
       },
     ]);
@@ -76,15 +80,21 @@ const PatientProfileScreen = ({ navigation }) => {
         {/* Stats */}
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
-            <Text style={styles.statValue}>12</Text>
+            <Text style={styles.statValue}>
+              {userData?.patientData?.totalBookings || 0}
+            </Text>
             <Text style={styles.statLabel}>Total Bookings</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statValue}>3</Text>
-            <Text style={styles.statLabel}>Upcoming</Text>
+            <Text style={styles.statValue}>
+              {userData?.patientData?.completedBookings || 0}
+            </Text>
+            <Text style={styles.statLabel}>Completed</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statValue}>4.8</Text>
+            <Text style={styles.statValue}>
+              {userData?.patientData?.rating || 5.0}
+            </Text>
             <Text style={styles.statLabel}>Rating</Text>
           </View>
         </View>

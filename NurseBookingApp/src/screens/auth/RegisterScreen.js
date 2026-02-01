@@ -11,7 +11,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AuthService from '../../services/AuthService';
 
 const RegisterScreen = ({ navigation }) => {
   const [name, setName] = useState('');
@@ -44,30 +44,30 @@ const RegisterScreen = ({ navigation }) => {
     setLoading(true);
 
     try {
-      // Simulate API call - Replace with actual registration
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      const userData = {
-        name,
+      const result = await AuthService.register({
         email,
+        password,
+        name,
         userType,
         ...(userType === 'nurse' && { licenseNumber, specialization }),
-      };
+      });
 
-      await AsyncStorage.setItem('userData', JSON.stringify(userData));
-
-      Alert.alert('Success', 'Registration successful!', [
-        {
-          text: 'OK',
-          onPress: () => {
-            if (userType === 'nurse') {
-              navigation.replace('NurseMain');
-            } else {
-              navigation.replace('PatientMain');
-            }
+      if (result.success) {
+        Alert.alert('Success', 'Registration successful!', [
+          {
+            text: 'OK',
+            onPress: () => {
+              if (userType === 'nurse') {
+                navigation.replace('NurseMain');
+              } else {
+                navigation.replace('PatientMain');
+              }
+            },
           },
-        },
-      ]);
+        ]);
+      } else {
+        Alert.alert('Registration Failed', result.error);
+      }
     } catch (error) {
       Alert.alert('Error', 'Registration failed. Please try again.');
     } finally {

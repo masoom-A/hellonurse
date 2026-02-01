@@ -8,8 +8,9 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import AuthService from '../../services/AuthService';
+import BookingService from '../../services/BookingService';
 
 const PatientHomeScreen = ({ navigation }) => {
   const [userData, setUserData] = useState(null);
@@ -23,9 +24,9 @@ const PatientHomeScreen = ({ navigation }) => {
 
   const loadUserData = async () => {
     try {
-      const data = await AsyncStorage.getItem('userData');
+      const data = await AuthService.getCurrentUserData();
       if (data) {
-        setUserData(JSON.parse(data));
+        setUserData(data);
       }
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -34,12 +35,11 @@ const PatientHomeScreen = ({ navigation }) => {
 
   const loadUpcomingBookings = async () => {
     try {
-      const bookings = await AsyncStorage.getItem('patientBookings');
-      if (bookings) {
-        const parsedBookings = JSON.parse(bookings);
-        const upcoming = parsedBookings.filter(b => b.status === 'upcoming').slice(0, 3);
-        setUpcomingBookings(upcoming);
-      }
+      const user = AuthService.getCurrentUser();
+      if (!user) return;
+
+      const bookings = await BookingService.getPatientBookings(user.uid, 'pending');
+      setUpcomingBookings(bookings.slice(0, 3));
     } catch (error) {
       console.error('Error loading bookings:', error);
     }
@@ -135,9 +135,11 @@ const PatientHomeScreen = ({ navigation }) => {
             upcomingBookings.map((booking, index) => (
               <View key={index} style={styles.bookingCard}>
                 <View style={styles.bookingInfo}>
-                  <Text style={styles.nurseName}>Nurse {booking.nurseName}</Text>
-                  <Text style={styles.bookingDate}>{booking.date} at {booking.time}</Text>
-                  <Text style={styles.bookingService}>{booking.service}</Text>
+                  <Text style={styles.nurseName}>Nurse {booking.metadata?.patientName || 'Assigned'}</Text>
+                  <Text style={styles.bookingDate}>
+                    {booking.scheduledDate || 'TBD'} at {booking.scheduledTime || 'TBD'}
+                  </Text>
+                  <Text style={styles.bookingService}>{booking.serviceType}</Text>
                 </View>
                 <View style={styles.bookingStatus}>
                   <Text style={styles.statusText}>Confirmed</Text>
