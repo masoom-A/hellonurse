@@ -9,24 +9,27 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import AuthService from '../../services/AuthService';
+import BookingService from '../../services/BookingService';
 
 const PatientBookingsScreen = () => {
   const [bookings, setBookings] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState('all'); // all, upcoming, completed, cancelled
+  const [filter, setFilter] = useState('all'); // all, pending, completed, cancelled
 
   useEffect(() => {
     loadBookings();
-  }, []);
+  }, [filter]);
 
   const loadBookings = async () => {
     try {
-      const data = await AsyncStorage.getItem('patientBookings');
-      if (data) {
-        setBookings(JSON.parse(data));
-      }
+      const user = AuthService.getCurrentUser();
+      if (!user) return;
+
+      const statusFilter = filter === 'all' ? null : filter;
+      const data = await BookingService.getPatientBookings(user.uid, statusFilter);
+      setBookings(data);
     } catch (error) {
       console.error('Error loading bookings:', error);
     }
@@ -48,25 +51,23 @@ const PatientBookingsScreen = () => {
           text: 'Yes',
           style: 'destructive',
           onPress: async () => {
-            const updatedBookings = bookings.map(b =>
-              b.id === bookingId ? { ...b, status: 'cancelled' } : b
-            );
-            setBookings(updatedBookings);
-            await AsyncStorage.setItem('patientBookings', JSON.stringify(updatedBookings));
+            const result = await BookingService.cancelBooking(bookingId, 'patient');
+            if (result.success) {
+              await loadBookings();
+            } else {
+              Alert.alert('Error', result.error || 'Failed to cancel booking');
+            }
           },
         },
       ]
     );
   };
 
-  const getFilteredBookings = () => {
-    if (filter === 'all') return bookings;
-    return bookings.filter(b => b.status === filter);
-  };
-
   const getStatusColor = (status) => {
     switch (status) {
-      case 'upcoming':
+      case 'pending':
+      case 'accepted':
+      case 'in_progress':
         return '#34C759';
       case 'completed':
         return '#007AFF';
@@ -77,7 +78,22 @@ const PatientBookingsScreen = () => {
     }
   };
 
-  const filteredBookings = getFilteredBookings();
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case 'pending':
+        return 'Pending';
+      case 'accepted':
+        return 'Accepted';
+      case 'in_progress':
+        return 'In Progress';
+      case 'completed':
+        return 'Completed';
+      case 'cancelled':
+        return 'Cancelled';
+      default:
+        return status.charAt(0).toUpperCase() + status.slice(1);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -87,7 +103,7 @@ const PatientBookingsScreen = () => {
 
       {/* Filter Tabs */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterContainer}>
-        {['all', 'upcoming', 'completed', 'cancelled'].map((f) => (
+        {['all', 'pending', 'completed', 'cancelled'].map((f) => (
           <TouchableOpacity
             key={f}
             style={[styles.filterTab, filter === f && styles.filterTabActive]}
@@ -107,7 +123,7 @@ const PatientBookingsScreen = () => {
         }
         contentContainerStyle={styles.scrollContent}
       >
-        {filteredBookings.length === 0 ? (
+        {bookings.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="calendar-outline" size={64} color="#ccc" />
             <Text style={styles.emptyStateTitle}>No bookings found</Text>
@@ -118,12 +134,12 @@ const PatientBookingsScreen = () => {
             </Text>
           </View>
         ) : (
-          filteredBookings.map((booking) => (
+          bookings.map((booking) => (
             <View key={booking.id} style={styles.bookingCard}>
               <View style={styles.bookingHeader}>
                 <View>
-                  <Text style={styles.nurseName}>Nurse {booking.nurseName}</Text>
-                  <Text style={styles.bookingService}>{booking.service}</Text>
+                  <Text style={styles.bookingService}>{booking.serviceType}</Text>
+                  <Text style={styles.bookingType}>{booking.type?.charAt(0).toUpperCase() + booking.type?.slice(1)} Booking</Text>
                 </View>
                 <View
                   style={[
@@ -132,7 +148,7 @@ const PatientBookingsScreen = () => {
                   ]}
                 >
                   <Text style={styles.statusText}>
-                    {booking.status.charAt(0).toUpperCase() + booking.status.slice(1)}
+                    {getStatusLabel(booking.status)}
                   </Text>
                 </View>
               </View>
@@ -140,27 +156,31 @@ const PatientBookingsScreen = () => {
               <View style={styles.bookingDetails}>
                 <View style={styles.detailRow}>
                   <Ionicons name="calendar-outline" size={18} color="#666" />
-                  <Text style={styles.detailText}>{booking.date}</Text>
+                  <Text style={styles.detailText}>
+                    {booking.scheduledDate || 'Date TBD'}
+                  </Text>
                 </View>
                 <View style={styles.detailRow}>
                   <Ionicons name="time-outline" size={18} color="#666" />
-                  <Text style={styles.detailText}>{booking.time}</Text>
+                  <Text style={styles.detailText}>
+                    {booking.scheduledTime || 'Time TBD'}
+                  </Text>
                 </View>
                 <View style={styles.detailRow}>
                   <Ionicons name="location-outline" size={18} color="#666" />
                   <Text style={styles.detailText} numberOfLines={1}>
-                    {booking.address}
+                    {booking.location?.address || 'Address not set'}
                   </Text>
                 </View>
-                {booking.notes && (
+                {booking.notes ? (
                   <View style={styles.detailRow}>
                     <Ionicons name="document-text-outline" size={18} color="#666" />
                     <Text style={styles.detailText}>{booking.notes}</Text>
                   </View>
-                )}
+                ) : null}
               </View>
 
-              {booking.status === 'upcoming' && (
+              {(booking.status === 'pending' || booking.status === 'accepted') && (
                 <View style={styles.bookingActions}>
                   <TouchableOpacity style={styles.actionButton}>
                     <Ionicons name="call-outline" size={18} color="#007AFF" />
@@ -248,13 +268,13 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 16,
   },
-  nurseName: {
+  bookingService: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 4,
   },
-  bookingService: {
+  bookingType: {
     fontSize: 14,
     color: '#007AFF',
   },

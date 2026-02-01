@@ -13,73 +13,96 @@ import { auth, firestore } from './firebase';
 class AuthService {
   
   /**
+   * Build the user document object
+   */
+  buildUserDoc(uid, { email, name, userType, licenseNumber, specialization }) {
+    return {
+      uid,
+      email,
+      name,
+      userType,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+
+      ...(userType === 'patient' && {
+        patientData: {
+          totalBookings: 0,
+          completedBookings: 0,
+          rating: 5.0,
+          savedAddresses: [],
+          favoriteNurses: []
+        }
+      }),
+
+      ...(userType === 'nurse' && {
+        nurseData: {
+          licenseNumber: licenseNumber || '',
+          specialization: specialization || '',
+          experience: 'junior',
+          yearsOfExperience: 0,
+          certifications: [],
+          services: [],
+          isAvailable: false,
+          availabilityStatus: 'offline',
+          rating: 5.0,
+          totalBookings: 0,
+          completedBookings: 0,
+          acceptanceRate: 1.0,
+          earnings: {
+            total: 0,
+            thisMonth: 0,
+            lastPayout: null
+          },
+          currentLocation: null
+        }
+      })
+    };
+  }
+
+  /**
    * Register new user (Patient or Nurse)
    */
   async register(userData) {
     try {
-      const { email, password, name, userType, ...additionalData } = userData;
-      
-      // 1. Create Firebase Auth user
-      const userCredential = await createUserWithEmailAndPassword(
-        auth, 
-        email, 
-        password
-      );
-      
-      const user = userCredential.user;
-      
+      const { email, password, name, userType, licenseNumber, specialization } = userData;
+      let user;
+
+      try {
+        // 1. Try to create Firebase Auth user
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        user = userCredential.user;
+      } catch (authError) {
+        // If email already exists, check if it's an orphaned Auth user (no Firestore doc)
+        if (authError.code === 'auth/email-already-in-use') {
+          const signInCredential = await signInWithEmailAndPassword(auth, email, password);
+          const existingUser = signInCredential.user;
+
+          // Check if Firestore doc exists
+          const existingDoc = await getDoc(doc(firestore, 'users', existingUser.uid));
+          if (existingDoc.exists()) {
+            // Doc exists — genuine duplicate registration
+            return {
+              success: false,
+              error: 'This email is already registered'
+            };
+          }
+
+          // Doc doesn't exist — orphaned Auth user, recover it
+          user = existingUser;
+        } else {
+          throw authError;
+        }
+      }
+
       // 2. Create user document in Firestore
-      const userDoc = {
-        uid: user.uid,
-        email: email,
-        name: name,
-        userType: userType, // 'patient' or 'nurse'
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        
-        // Patient specific fields
-        ...(userType === 'patient' && {
-          patientData: {
-            totalBookings: 0,
-            completedBookings: 0,
-            rating: 5.0,
-            savedAddresses: [],
-            favoriteNurses: []
-          }
-        }),
-        
-        // Nurse specific fields
-        ...(userType === 'nurse' && {
-          nurseData: {
-            licenseNumber: additionalData.licenseNumber || '',
-            specialization: additionalData.specialization || '',
-            experience: 'junior',
-            yearsOfExperience: 0,
-            certifications: [],
-            services: [],
-            isAvailable: false,
-            availabilityStatus: 'offline',
-            rating: 5.0,
-            totalBookings: 0,
-            completedBookings: 0,
-            acceptanceRate: 1.0,
-            earnings: {
-              total: 0,
-              thisMonth: 0,
-              lastPayout: null
-            },
-            currentLocation: null
-          }
-        })
-      };
-      
+      const userDoc = this.buildUserDoc(user.uid, { email, name, userType, licenseNumber, specialization });
       await setDoc(doc(firestore, 'users', user.uid), userDoc);
-      
+
       return {
         success: true,
         user: userDoc
       };
-      
+
     } catch (error) {
       console.error('Registration error:', error);
       return {
@@ -95,19 +118,17 @@ class AuthService {
   async login(email, password) {
     try {
       // 1. Sign in with Firebase Auth
-      const userCredential = await signInWithEmailAndPassword(
-        auth, 
-        email, 
-        password
-      );
-      
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       
       // 2. Get user data from Firestore
       const userDoc = await getDoc(doc(firestore, 'users', user.uid));
       
       if (!userDoc.exists()) {
-        throw new Error('User data not found');
+        return {
+          success: false,
+          error: 'Account is incomplete. Please register again.'
+        };
       }
       
       const userData = userDoc.data();
@@ -216,8 +237,11 @@ class AuthService {
       'auth/weak-password': 'Password should be at least 6 characters',
       'auth/user-not-found': 'No account found with this email',
       'auth/wrong-password': 'Incorrect password',
+      'auth/invalid-credential': 'Invalid email or password',
       'auth/too-many-requests': 'Too many attempts. Please try again later',
-      'auth/network-request-failed': 'Network error. Check your connection'
+      'auth/network-request-failed': 'Network error. Check your connection',
+      'auth/operation-not-allowed': 'Email/password sign-in is not enabled',
+      'auth/internal-error': 'An internal error occurred. Please try again',
     };
     
     return errorMessages[errorCode] || 'An error occurred. Please try again';
